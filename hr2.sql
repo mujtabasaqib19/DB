@@ -811,3 +811,102 @@ EXCEPTION
         ROLLBACK TO POINTS_UPDATED;
         DBMS_OUTPUT.PUT_LINE('transaction failed due to an error ' ||SQLERRM);
 END;
+
+
+CREATE TABLE orders (
+    order_id INT PRIMARY KEY,
+    customer_id INT,
+    order_date DATE,
+    total_amount DECIMAL(10, 2),
+    status VARCHAR(50)
+);
+
+CREATE TABLE payments (
+    payment_id INT PRIMARY KEY,
+    order_id INT,
+    payment_date DATE,
+    payment_amount DECIMAL(10, 2),
+    payment_method VARCHAR(50),
+    FOREIGN KEY (order_id) REFERENCES orders(order_id)
+);
+
+CREATE TRIGGER after_insert_payment
+AFTER INSERT ON payments
+FOR EACH ROW
+BEGIN
+    DECLARE total_paid DECIMAL(10, 2);
+    SELECT SUM(payment_amount) INTO total_paid
+    FROM payments
+    WHERE order_id = NEW.order_id;
+    IF total_paid >= (SELECT total_amount FROM orders WHERE order_id = NEW.order_id) THEN
+        UPDATE orders
+        SET status = 'completed'
+        WHERE order_id = NEW.order_id;
+    ELSE
+        UPDATE orders
+        SET status = 'pending'
+        WHERE order_id = NEW.order_id;
+    END IF;
+END;
+
+CREATE TRIGGER after_update_payment
+AFTER UPDATE ON payments
+FOR EACH ROW
+BEGIN
+    DECLARE total_paid DECIMAL(10, 2);
+    SELECT SUM(payment_amount) INTO total_paid
+    FROM payments
+    WHERE order_id = NEW.order_id;
+    IF total_paid >= (SELECT total_amount FROM orders WHERE order_id = NEW.order_id) THEN
+        UPDATE orders
+        SET status = 'completed'
+        WHERE order_id = NEW.order_id;
+    ELSE
+        UPDATE orders
+        SET status = 'pending'
+        WHERE order_id = NEW.order_id;
+    END IF;
+END;
+
+CREATE TRIGGER after_delete_payment
+AFTER DELETE ON payments
+FOR EACH ROW
+BEGIN
+    DECLARE total_paid DECIMAL(10, 2);
+    SELECT SUM(payment_amount) INTO total_paid
+    FROM payments
+    WHERE order_id = OLD.order_id;
+    IF total_paid = 0 THEN
+        UPDATE orders
+        SET status = 'cancelled'
+        WHERE order_id = OLD.order_id;
+    ELSEIF total_paid < (SELECT total_amount FROM orders WHERE order_id = OLD.order_id) THEN
+        UPDATE orders
+        SET status = 'pending'
+        WHERE order_id = OLD.order_id;
+    END IF;
+END;
+
+START TRANSACTION;
+
+INSERT INTO orders (order_id, customer_id, order_date, total_amount, status)
+VALUES (1, 101, '2024-12-04', 500.00, 'pending');
+
+INSERT INTO payments (payment_id, order_id, payment_date, payment_amount, payment_method)
+VALUES (1, 1, '2024-12-04', 250.00, 'credit');
+
+INSERT INTO payments (payment_id, order_id, payment_date, payment_amount, payment_method)
+VALUES (2, 1, '2024-12-04', 250.00, 'debit');
+
+COMMIT;
+
+START TRANSACTION;
+
+INSERT INTO orders (order_id, customer_id, order_date, total_amount, status)
+VALUES (2, 102, '2024-12-04', 600.00, 'pending');
+
+INSERT INTO payments (payment_id, order_id, payment_date, payment_amount, payment_method)
+VALUES (3, 2, '2024-12-04', 700.00, 'credit');
+
+ROLLBACK;
+
